@@ -52,31 +52,21 @@ def main():
         print("Successfully authenticated. You can now start playing.")
         while True:
             display_action_history(actions, username)
-            try:
-                action = session.prompt("Enter an action ('attack', 'persuade', 'inventory', 'quit'): ").strip().lower()
-            except KeyboardInterrupt:
-                break
+            outer_action = session.prompt("Enter an action ('attack', 'persuade', 'inventory', 'quit'): ").strip().lower()
 
-            if action == '' or action not in ['attack', 'persuade', 'inventory', 'quit']:
-                print("Invalid action...")
-                input("Press Enter to continue...")
-                continue
-
-            if action == 'quit':
-                break
-
-            s.sendall(action.encode('utf-8'))
-
-            if action == 'inventory':
+            if outer_action in ['attack', 'persuade']:
+                s.sendall(outer_action.encode('utf-8'))
+                result = s.recv(1024).decode('utf-8')
+                actions.append(f"Action: {outer_action} - Result: {result}")
+            elif outer_action == 'inventory':
+                s.sendall(outer_action.encode('utf-8'))
                 inventory = s.recv(1024).decode('utf-8')
-                print(f"Received inventory from server: {inventory}")
-
+                print(f"--- Inventory ---:\n{inventory}\n")
                 while True:
                     inventory_action = session.prompt("Inventory actions ('drop <item>', 'store <item>', 'exit'): ").strip().lower()
-
                     if inventory_action == 'exit':
+                        print("Exiting inventory.")
                         break
-
                     inventory_action_parts = inventory_action.split(' ', 1)  # Splitting only on the first space.
                     if len(inventory_action_parts) == 2:
                         action, item = inventory_action_parts
@@ -95,10 +85,8 @@ def main():
                     else:
                         updated_inventory = s.recv(1024).decode('utf-8')  # Wait for the updated inventory
                         print(f"Updated Inventory: {updated_inventory}")
-
-            result = s.recv(1024).decode('utf-8')
-            actions.append(f"Action: {action} - Result: {result}")
-
+            elif outer_action == 'quit':
+                break
 
 if __name__ == "__main__":
     main()
