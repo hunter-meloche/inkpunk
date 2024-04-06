@@ -68,10 +68,33 @@ def main():
             s.sendall(action.encode('utf-8'))
 
             if action == 'inventory':
-                inventory = s.recv(1024).decode('utf-8')  # Receive inventory from server
-                print(f"Inventory: {inventory}")
-                input("Press Enter to continue...")
-                continue
+                inventory = s.recv(1024).decode('utf-8')
+                print(f"Received inventory from server: {inventory}")
+
+                while True:
+                    inventory_action = session.prompt("Inventory actions ('drop <item>', 'store <item>', 'exit'): ").strip().lower()
+
+                    if inventory_action == 'exit':
+                        break
+
+                    inventory_action_parts = inventory_action.split(' ', 1)  # Splitting only on the first space.
+                    if len(inventory_action_parts) == 2:
+                        action, item = inventory_action_parts
+                        formatted_action = f"inventory_action:{action},{item}"  # Correctly format as expected by the server
+                        print(f"Sending formatted inventory action to server: {formatted_action}")  # Corrected debug print
+                        s.sendall(formatted_action.encode('utf-8'))  # Send the correctly formatted action
+                    else:
+                        print("Invalid inventory action format.")
+                        continue  # Prompt the user again for a correct action
+
+                    response = s.recv(1024).decode('utf-8')
+                    print(f"Received response from server: {response}")
+
+                    if response not in ["Item dropped.", "Item stored."]:
+                        print(response)  # For "Item not found" and other messages
+                    else:
+                        updated_inventory = s.recv(1024).decode('utf-8')  # Wait for the updated inventory
+                        print(f"Updated Inventory: {updated_inventory}")
 
             result = s.recv(1024).decode('utf-8')
             actions.append(f"Action: {action} - Result: {result}")

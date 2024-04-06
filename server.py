@@ -27,20 +27,64 @@ def load_accounts():
             accounts.append({'username': username, 'password': password, 'inventory': inventory})
     return accounts
 
+def get_user_inventory(username, accounts):
+    """Retrieve the inventory for a specific user."""
+    for account in accounts:
+        if account['username'] == username:
+            return account['inventory']
+    return []
+
+def update_inventory(username, inventory, accounts):
+    """Update the user's inventory in the accounts list and accounts.csv."""
+    print(f"Updating inventory for {username}: {inventory}")  # Debugging print
+    for account in accounts:
+        if account['username'] == username:
+            account['inventory'] = inventory
+            break
+
+    # Debugging print to confirm inventory before writing to CSV
+    print(f"Final inventory for {username} before CSV update: {account['inventory']}")
+
+    # Update accounts.csv
+    with open('accounts.csv', 'w', newline='') as csvfile:
+        fieldnames = ['username', 'password', 'inventory']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for account in accounts:
+            writer.writerow({'username': account['username'],
+                             'password': account['password'],
+                             'inventory': ';'.join(account['inventory'])})
+
+def handle_inventory_actions(action, item, user_inventory):
+    """Process inventory actions (drop/store) and update the inventory."""
+    print(f"Received inventory action: {action} for item: {item}")  # Debugging print
+
+    if action == "drop":
+        if item in user_inventory:
+            user_inventory.remove(item)
+            return True, "Item dropped."
+        else:
+            return False, "Item not found."
+    elif action == "store":
+        user_inventory.append(item)
+        return True, "Item stored."
+
+    return False, f"Unknown inventory action: {action}"
+
 def handle_client(conn, addr, accounts):
     print(f"Connected by {addr}")
-    user_inventory = []  # Placeholder for the authenticated user's inventory
+    authenticated_username = None  # Keep track of the authenticated user's username
+
     try:
         # Receive and parse login credentials
         credentials = conn.recv(1024).decode('utf-8')
         username, password = credentials.split(',')
 
-        # Authenticate user and retrieve inventory
-        for account in accounts:
-            if account['username'] == username and account['password'] == password:
-                conn.sendall(b"AUTH_SUCCESS")
-                user_inventory = account['inventory']  # Capture the user's inventory after authentication
-                break
+        # Authenticate user
+        if authenticate_user(username, password, accounts):
+            conn.sendall(b"AUTH_SUCCESS")
+            authenticated_username = username  # Store the authenticated user's username
         else:
             conn.sendall(b"AUTH_FAIL")
             return  # End connection if authentication fails
@@ -58,10 +102,28 @@ def handle_client(conn, addr, accounts):
                 result = dice_roll("D20")
             elif action == "persuade":
                 result = dice_roll("D10")
-            elif action == "inventory":
-                # Join inventory items into a single string to send
+            elif action == "inventory" and authenticated_username:
+                current_accounts = load_accounts()  # Reload accounts from the CSV file
+                user_inventory = get_user_inventory(authenticated_username, current_accounts)
                 inventory_str = '; '.join(user_inventory)
                 conn.sendall(inventory_str.encode('utf-8'))
+                continue  # Skip the rest of the loop to wait for the next action
+            elif "inventory_action" in action and authenticated_username:
+                # Correctly split the action string
+                _, action_details = action.split(':')
+                command, item = action_details.split(',')  # Splitting on ',' to get the command and the item
+
+                # Now you have the 'command' ("drop" or "store") and the 'item' correctly assigned
+                success, message = handle_inventory_actions(command, item, user_inventory)
+
+                if not success:
+                    conn.sendall(message.encode('utf-8'))
+                    continue
+
+                update_inventory(authenticated_username, user_inventory, accounts)  # Ensure this function updates 'accounts'
+
+                inventory_str = '; '.join(user_inventory)
+                conn.sendall(inventory_str.encode('utf-8'))  # Send the updated inventory back to the client
                 continue  # Skip the rest of the loop to wait for the next action
             else:
                 result = "Unknown action"
@@ -73,7 +135,6 @@ def handle_client(conn, addr, accounts):
     finally:
         conn.close()
         print(f"Connection with {addr} closed.")
-
 
 def main():
     accounts = load_accounts()  # Load accounts from the CSV file
