@@ -61,8 +61,11 @@ def main():
             elif outer_action == 'inventory':
                 s.sendall(outer_action.encode('utf-8'))
                 inventory = s.recv(1024).decode('utf-8')
-                print(f"--- Inventory ---:\n{inventory}\n")
+
                 while True:
+                    clear_screen()  # Clear the screen before displaying the inventory
+                    print("--- Inventory ---:")
+                    print(inventory)
                     inventory_action = session.prompt("Inventory actions ('drop <item>', 'store <item>', 'exit'): ").strip().lower()
                     if inventory_action == 'exit':
                         print("Exiting inventory.")
@@ -76,15 +79,13 @@ def main():
                     else:
                         print("Invalid inventory action format.")
                         continue  # Prompt the user again for a correct action
-
                     response = s.recv(1024).decode('utf-8')
                     print(f"Received response from server: {response}")
-
                     if response not in ["Item dropped.", "Item stored."]:
-                        print(response)  # For "Item not found" and other messages
+                        s.sendall(outer_action.encode('utf-8'))
+                        inventory = s.recv(1024).decode('utf-8')  # Wait for the updated inventory
                     else:
-                        updated_inventory = s.recv(1024).decode('utf-8')  # Wait for the updated inventory
-                        print(f"Updated Inventory: {updated_inventory}")
+                        print(response) # Print the error message
             elif outer_action == 'quit':
                 break
 
