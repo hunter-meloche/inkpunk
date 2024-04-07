@@ -3,6 +3,7 @@ import os
 from collections import deque
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.styles import Style  # Import Style
 
 # Server configuration
 HOST = '127.0.0.1'
@@ -19,17 +20,20 @@ def read_credentials():
             password = lines[1].strip().split(': ')[1]
             return username, password
     except FileNotFoundError:
-        print("Login file not found. Make sure '.login' file exists in the current directory.")
+        print_red("Login file not found. Make sure '.login' file exists in the current directory.")
         exit()
     except IndexError:
-        print("Login file format is incorrect. It should be:\nusername: your_username\npassword: your_password")
+        print_red("Login file format is incorrect. It should be:\nusername: your_username\npassword: your_password")
         exit()
 
 def print_green(text):
     print("\033[32m" + text + "\033[0m")  # Green for general text
 
+def print_cyan(text):
+    print("\033[36m" + text + "\033[0m")  # Cyan for inventory
+
 def print_blue(text):
-    print("\033[34m" + text + "\033[0m")  # Blue for inventory
+    print("\033[34m" + text + "\033[0m")
 
 def print_red(text):
     print("\033[31m" + text + "\033[0m")  # Red for errors
@@ -47,7 +51,13 @@ def display_action_history(actions, username):
 def main():
     actions = deque(maxlen=5)
     username, password = read_credentials()
-    session = PromptSession(history=InMemoryHistory())
+
+    # Define custom style for prompt_toolkit
+    custom_style = Style.from_dict({
+        '': '#00ff00',  # Set default text to green
+    })
+
+    session = PromptSession(history=InMemoryHistory(), style=custom_style)  # Apply custom style
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((HOST, PORT))
@@ -74,7 +84,7 @@ def main():
 
                 while True:
                     clear_screen()  # Clear the screen before displaying the inventory
-                    print_blue("--- Inventory ---:")
+                    print_cyan("--- Inventory ---")
                     print_green(inventory)
                     # If the response is not the same as inventory and is not empty, print it
                     if response != inventory and response != "":

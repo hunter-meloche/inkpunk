@@ -1,2 +1,2 @@
-username: player1
-password: password123
+username: player2
+password: secretpassword456
