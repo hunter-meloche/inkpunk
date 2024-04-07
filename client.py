@@ -25,15 +25,24 @@ def read_credentials():
         print("Login file format is incorrect. It should be:\nusername: your_username\npassword: your_password")
         exit()
 
+def print_green(text):
+    print("\033[32m" + text + "\033[0m")  # Green for general text
+
+def print_blue(text):
+    print("\033[34m" + text + "\033[0m")  # Blue for inventory
+
+def print_red(text):
+    print("\033[31m" + text + "\033[0m")  # Red for errors
+
 def display_action_history(actions, username):
     clear_screen()
-    print(f"Source-MUD    (User: {username})")  # Include the username in the display
-    print("-----------------------------------------------")
+    print_green(f"Source-MUD    (User: {username})")
+    print_green("-----------------------------------------------")
     for _ in range(5 - len(actions)):
         print()  # Print empty line for padding
     for action in actions:
-        print(action)  # Print each action
-    print("-----------------------------------------------")
+        print_green(action)
+    print_green("-----------------------------------------------")
 
 def main():
     actions = deque(maxlen=5)
@@ -45,11 +54,11 @@ def main():
         s.sendall(f"{username},{password}".encode('utf-8'))
         auth_response = s.recv(1024).decode('utf-8')
         if auth_response != "AUTH_SUCCESS":
-            print("Invalid username or password. Press Enter to exit...")
+            print_red("Invalid username or password. Press Enter to exit...")
             input()
             return
 
-        print("Successfully authenticated. You can now start playing.")
+        print_green("Successfully authenticated. You can now start playing.")
         while True:
             display_action_history(actions, username)
             outer_action = session.prompt("Enter an action ('attack', 'persuade', 'inventory', 'quit'): ").strip().lower()
@@ -61,14 +70,22 @@ def main():
             elif outer_action == 'inventory':
                 s.sendall(outer_action.encode('utf-8'))
                 inventory = s.recv(1024).decode('utf-8')
+                response = ""  # Initialize response to empty string
 
                 while True:
                     clear_screen()  # Clear the screen before displaying the inventory
-                    print("--- Inventory ---:")
-                    print(inventory)
+                    print_blue("--- Inventory ---:")
+                    print_green(inventory)
+                    # If the response is not the same as inventory and is not empty, print it
+                    if response != inventory and response != "":
+                        # If the response starts with "Unknown inventory action:", print it in red
+                        if response.startswith("Unknown inventory action:"):
+                            print_red(response)
+                        else:
+                            print_green(response)
                     inventory_action = session.prompt("Inventory actions ('drop <item>', 'store <item>', 'exit'): ").strip().lower()
                     if inventory_action == 'exit':
-                        print("Exiting inventory.")
+                        print_green("Exiting inventory.")
                         break
                     inventory_action_parts = inventory_action.split(' ', 1)  # Splitting only on the first space.
                     if len(inventory_action_parts) == 2:
@@ -80,12 +97,13 @@ def main():
                         print("Invalid inventory action format.")
                         continue  # Prompt the user again for a correct action
                     response = s.recv(1024).decode('utf-8')
-                    print(f"Received response from server: {response}")
-                    if response not in ["Item dropped.", "Item stored."]:
-                        s.sendall(outer_action.encode('utf-8'))
-                        inventory = s.recv(1024).decode('utf-8')  # Wait for the updated inventory
+                    # If the response does not start with "Unknown inventory action:", assign it to inventory
+                    if not response.startswith("Unknown inventory action:"):
+                        #s.sendall(outer_action.encode('utf-8'))
+                        #inventory = s.recv(1024).decode('utf-8')  # Wait for the updated inventory
+                        inventory = response
                     else:
-                        print(response) # Print the error message
+                        continue
             elif outer_action == 'quit':
                 break
 
