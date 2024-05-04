@@ -1,7 +1,7 @@
 import socket
 import random
 import threading
-import csv
+import sqlite3
 
 # Server configuration
 HOST = '127.0.0.1'
@@ -13,53 +13,39 @@ def dice_roll(dice_type):
     elif dice_type == "D10":
         return random.randint(1, 10)
 
-def authenticate_user(username, password, accounts):
-    return any(account['username'] == username and account['password'] == password for account in accounts)
+def authenticate_user(username, password):
+    conn = sqlite3.connect('accounts.db')
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM accounts WHERE username=? AND password=?", (username, password))
+    result = cur.fetchone()
+    conn.close()
+    return result is not None
 
 def load_accounts():
-    accounts = []
-    with open('accounts.csv', newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            username = row['username']
-            password = row['password']
-            inventory = row['inventory'].split(';') if 'inventory' in row and row['inventory'] else []
-            accounts.append({'username': username, 'password': password, 'inventory': inventory})
+    conn = sqlite3.connect('accounts.db')
+    cur = conn.cursor()
+    cur.execute("SELECT username, password, inventory FROM accounts")
+    accounts = [{'username': row[0], 'password': row[1], 'inventory': row[2].split(';') if row[2] else []} for row in cur]
+    conn.close()
     return accounts
 
-def get_user_inventory(username, accounts):
-    """Retrieve the inventory for a specific user."""
-    for account in accounts:
-        if account['username'] == username:
-            return account['inventory']
-    return []
+def get_user_inventory(username):
+    conn = sqlite3.connect('accounts.db')
+    cur = conn.cursor()
+    cur.execute("SELECT inventory FROM accounts WHERE username=?", (username,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0].split(';') if row and row[0] else []
 
-def update_inventory(username, inventory, accounts):
-    """Update the user's inventory in the accounts list and accounts.csv."""
-    print(f"Updating inventory for {username}: {inventory}")  # Debugging print
-    for account in accounts:
-        if account['username'] == username:
-            account['inventory'] = inventory
-            break
-
-    # Debugging print to confirm inventory before writing to CSV
-    print(f"Final inventory for {username} before CSV update: {account['inventory']}")
-
-    # Update accounts.csv
-    with open('accounts.csv', 'w', newline='') as csvfile:
-        fieldnames = ['username', 'password', 'inventory']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        writer.writeheader()
-        for account in accounts:
-            writer.writerow({'username': account['username'],
-                             'password': account['password'],
-                             'inventory': ';'.join(account['inventory'])})
+def update_inventory(username, inventory):
+    inventory_str = ';'.join(inventory)
+    conn = sqlite3.connect('accounts.db')
+    cur = conn.cursor()
+    cur.execute("UPDATE accounts SET inventory=? WHERE username=?", (inventory_str, username))
+    conn.commit()
+    conn.close()
 
 def handle_inventory_actions(action, item, user_inventory):
-    """Process inventory actions (drop/store) and update the inventory."""
-    print(f"Received inventory action: {action} for item: {item}")  # Debugging print
-
     if action == "drop":
         if item in user_inventory:
             user_inventory.remove(item)
@@ -69,67 +55,54 @@ def handle_inventory_actions(action, item, user_inventory):
     elif action == "store":
         user_inventory.append(item)
         return True, "Item stored."
-
     return False, f"Unknown inventory action: {action}"
 
-def handle_client(conn, addr, accounts):
+def handle_client(conn, addr):
     print(f"Connected by {addr}")
-    authenticated_username = None  # Keep track of the authenticated user's username
+    authenticated_username = None
 
     try:
-        # Receive and parse login credentials
         credentials = conn.recv(1024).decode('utf-8')
         username, password = credentials.split(',')
 
-        # Authenticate user
-        if authenticate_user(username, password, accounts):
+        if authenticate_user(username, password):
             conn.sendall(b"AUTH_SUCCESS")
-            authenticated_username = username  # Store the authenticated user's username
+            authenticated_username = username
         else:
             conn.sendall(b"AUTH_FAIL")
-            return  # End connection if authentication fails
+            return
 
-        # Main action loop
         while True:
             data = conn.recv(1024)
             if not data:
                 break
 
             action = data.decode('utf-8').lower()
-            print(f"Received action from {addr}: {action}")
-
             if action == "attack":
                 result = dice_roll("D20")
             elif action == "persuade":
                 result = dice_roll("D10")
             elif action == "inventory" and authenticated_username:
-                current_accounts = load_accounts()  # Reload accounts from the CSV file
-                user_inventory = get_user_inventory(authenticated_username, current_accounts)
+                user_inventory = get_user_inventory(authenticated_username)
                 inventory_str = '; '.join(user_inventory)
                 conn.sendall(inventory_str.encode('utf-8'))
-                continue  # Skip the rest of the loop to wait for the next action
+                continue
             elif "inventory_action" in action and authenticated_username:
-                # Correctly split the action string
                 _, action_details = action.split(':')
-                command, item = action_details.split(',')  # Splitting on ',' to get the command and the item
-
-                # Now you have the 'command' ("drop" or "store") and the 'item' correctly assigned
+                command, item = action_details.split(',')
                 success, message = handle_inventory_actions(command, item, user_inventory)
 
                 if not success:
                     conn.sendall(message.encode('utf-8'))
                     continue
 
-                update_inventory(authenticated_username, user_inventory, accounts)  # Ensure this function updates 'accounts'
-
+                update_inventory(authenticated_username, user_inventory)
                 inventory_str = '; '.join(user_inventory)
-                conn.sendall(inventory_str.encode('utf-8'))  # Send the updated inventory back to the client
-                continue  # Skip the rest of the loop to wait for the next action
+                conn.sendall(inventory_str.encode('utf-8'))
+                continue
             else:
                 result = "Unknown action"
-
             conn.sendall(str(result).encode('utf-8'))
-            print(f"Sent result to {addr}: {result}")
     except ConnectionResetError:
         print(f"Connection with {addr} lost.")
     finally:
@@ -137,8 +110,6 @@ def handle_client(conn, addr, accounts):
         print(f"Connection with {addr} closed.")
 
 def main():
-    accounts = load_accounts()  # Load accounts from the CSV file
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
         s.listen()
@@ -146,7 +117,7 @@ def main():
 
         while True:
             conn, addr = s.accept()
-            client_thread = threading.Thread(target=handle_client, args=(conn, addr, accounts))
+            client_thread = threading.Thread(target=handle_client, args=(conn, addr))
             client_thread.start()
             print(f"Active connections: {threading.active_count() - 1}")
 
